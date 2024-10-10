@@ -1,8 +1,15 @@
 import { ChatOpenAI } from "@langchain/openai";
 // import * as hub from "langchain/hub";
-import { AIMessage, BaseMessage, HumanMessage } from "@langchain/core/messages";
+import {
+  AIMessage,
+  BaseMessage,
+  HumanMessage,
+  SystemMessage,
+} from "@langchain/core/messages";
+import { StringOutputParser } from "@langchain/core/output_parsers";
 import {
   ChatPromptTemplate,
+  HumanMessagePromptTemplate,
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
 import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
@@ -21,7 +28,7 @@ const model = new ChatOpenAI({
 type QuestionType = "theoretical" | "coding" | "unknown";
 
 // Define the graph state
-const GraphState = Annotation.Root({
+export const GraphState = Annotation.Root({
   questionText: Annotation<string>(),
   questionNumber: Annotation<number>(),
   type: Annotation<QuestionType>(),
@@ -30,8 +37,7 @@ const GraphState = Annotation.Root({
   formattedCode: Annotation<string>(),
   executionResult: Annotation<string>(),
   executionSuccess: Annotation<boolean>(),
-  answers: Annotation<string[]>(),
-  response: Annotation<string>(),
+  explanation: Annotation<string>(),
   messages: Annotation<BaseMessage[]>({
     reducer: (x, y) => x.concat(y),
     default: () => [],
@@ -55,9 +61,15 @@ async function inputNode(state: typeof GraphState.State) {
       Parameters: [${state.parameters?.join(", ")}]`
         : ""
     }
+    
+    --------------------
 
     Code to format:
     ${state.code}
+
+    --------------------
+
+    Formatted code:
     `);
 
   const formattedCode = res.content.toString().trim();
@@ -73,10 +85,11 @@ async function executorNode(state: typeof GraphState.State) {
       "system",
       `You are a Python coding assistant tasked with executing Python code that the user provides and returning the response.
   Try your best to make the code work and execute it using the provided tool for code execution. You should strictly answer with the result of the execution or an error.
-  If the user provides critique for the error, revise the code, try to fix it and execute again.`,
+  If the user provides critique for the error, fix the code and execute again.`,
     ],
     new MessagesPlaceholder("messages"),
   ]);
+
   const executionChain = prompt.pipe(model);
 
   if (state.messages.length === 0) {
@@ -90,8 +103,14 @@ async function executorNode(state: typeof GraphState.State) {
           : ""
       }
 
+      --------------------
+
       Code to execute:
       ${state.formattedCode}
+
+      --------------------
+
+      Execution result:
       `,
     });
     state.messages.push(message);
@@ -106,10 +125,9 @@ async function executorNode(state: typeof GraphState.State) {
 
   const res = await executionChain.invoke({ messages: state.messages });
 
-  const executionResult = res.content;
   // console.log(
   //   "EXECUTION NODE RESULT: ",
-  //   JSON.stringify(executionResult),
+  //   JSON.stringify(res.content),
   //   `\n\n`
   // );
   return { messages: [res], executionSuccess: false };
@@ -117,7 +135,7 @@ async function executorNode(state: typeof GraphState.State) {
 
 async function reflectionNode(state: typeof GraphState.State) {
   // Logic for reflection on the result
-  const { messages } = state;
+  const { messages, executionSuccess } = state;
 
   // console.log("REFLECTION NODE COUNTER: ", state.reflectionLoopCount);
 
@@ -135,7 +153,7 @@ async function reflectionNode(state: typeof GraphState.State) {
         .string()
         .optional()
         .describe(
-          "A critique of the code if it seems like the result doesn't make sense or if an error occured. Contains recommendations to improve the code."
+          "A critique of the code if it seems like the result doesn't make sense or if an error occured. Contains recommendations to improve and fix the code."
         ),
     })
   );
@@ -154,7 +172,7 @@ async function reflectionNode(state: typeof GraphState.State) {
   const reflectionPrompt = ChatPromptTemplate.fromMessages([
     [
       "system",
-      `You are a Python language helper tasked with helping the user on executing Python code. Analyse the code that the user sent and the execution response. If there's an error, include recommendations on how to fix the code for them to try and resolve the error.
+      `You are a Python language debugger tasked with helping the user on executing Python code. Analyse the code that the user sent and the execution response. If there's an error, include recommendations on how to fix the code for them to try and resolve the error.
       Respond in a JSON format with all required information.`,
     ],
     new MessagesPlaceholder("messages"),
@@ -178,7 +196,12 @@ const shouldContinue = (state: typeof GraphState.State) => {
 
   // console.log("SHOULD CONTINUE? COUNTER AT ", reflectionLoopCount);
 
-  if (reflectionLoopCount > 3 || executionSuccess) return "output";
+  if (reflectionLoopCount > 3) {
+    // TODO: return message "unable to solve"
+    return "output";
+  }
+
+  if (executionSuccess) return "output";
 
   const lastMessage = messages[messages.length - 1];
 
@@ -195,20 +218,37 @@ const shouldContinue = (state: typeof GraphState.State) => {
 
 async function outputNode(state: typeof GraphState.State) {
   // Logic to output the final result
-  const { messages } = state;
+  const { messages, formattedCode, executionSuccess } = state;
+
+  const executionResult = messages[messages.length - 1].content.toString();
+
   const outputPrompt = ChatPromptTemplate.fromMessages([
-    [
-      "system",
-      `You are tasked with summarizing the following conversation between you and the user. The conversation is about executing some Python code and getting the result. Your goal is to extract the final execution result of the code from the conversation. Return only the execution result and nothing else. If the code didn't execute properly, shortly and concisely explain what was the reason for the failed execution.`,
-    ],
-    new MessagesPlaceholder("messages"),
+    new SystemMessage(`Ti si Python asistent za objasnjavanje koda. Tvoj zadatak je da objasnis korisniku kako se kod izvrsio da bi se doslo do krajnjeg rezultata izvrsavanja. Ukratko objasni korisniku postupak izvrsavanja u par recenica.
+      Korisnik ce ti dati kod kao i rezultat izvrsavanja u Python okruzenju.
+      Budi ljubazan i pomozi korisniku da razume kod.`),
+    HumanMessagePromptTemplate.fromTemplate(`
+      Kod: 
+      {code}
+      
+      -------------
+
+      Rezultat izvrsavanja: {result}
+
+      -------------
+
+      Objasnjenje:
+      `),
   ]);
-  const outputChain = outputPrompt.pipe(model);
-  const res = await outputChain.invoke({ messages });
-  // console.log("OUTPUT NODE RESULT: ", res.content.toString(), `\n\n`);
+  const outputChain = outputPrompt.pipe(model).pipe(new StringOutputParser());
+  const res = await outputChain.invoke({
+    code: formattedCode,
+    result: executionResult,
+  });
+  console.log("OUTPUT NODE RESULT (EXPLANATION): ", res, `\n\n`);
   return {
-    response: res.content.toString(),
-    messages: [res],
+    // response: messages[messages.length - 1].content.toString(),
+    executionResult,
+    explanation: res,
   };
 }
 
@@ -234,10 +274,4 @@ graph
   .addEdge("reflection", "executor")
   .addEdge("output", END);
 
-// const checkpointer = new MemorySaver();
-
-// Finally, we compile it!
-// This compiles it into a LangChain Runnable.
-// Note that we're (optionally) passing the memory when compiling the graph
-// export const solverAgent = graph.compile({ checkpointer });
 export const solverAgent = graph.compile();
