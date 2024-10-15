@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatQuestion } from "@/lib/questionMarkdown";
-import { mockRes } from "@/lib/tmp";
 import { FileText, Loader2, Upload } from "lucide-react";
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
@@ -61,10 +60,10 @@ export default function TestAnalyzer() {
     try {
       const data = new FormData();
       data.append("file", file);
-      // const response = await fetch("/api/process-exam", {
-      //   method: "POST",
-      //   body: data,
-      // });
+      const response = await fetch("/api/process-exam", {
+        method: "POST",
+        body: data,
+      });
       const body: {
         response: Array<{
           questionText: string;
@@ -77,7 +76,20 @@ export default function TestAnalyzer() {
           executionSuccess: boolean;
           explanation: string;
         }>;
-      } = mockRes;
+      } = await response.json();
+      // const body: {
+      //   response: Array<{
+      //     questionText: string;
+      //     questionNumber: number;
+      //     type: string;
+      //     parameters: string[] | null;
+      //     code?: string;
+      //     formattedCode?: string;
+      //     executionResult: string;
+      //     executionSuccess: boolean;
+      //     explanation: string;
+      //   }>;
+      // } = mockRes;
 
       setAnswers(body.response);
       setResult(
@@ -152,7 +164,7 @@ export default function TestAnalyzer() {
               )}
             </Button>
           </div>
-          {result && (
+          {result && !isLoading && (
             <div className="mt-8">
               <h2 className="text-lg font-semibold mb-4">Analysis Results</h2>
               <div className="prose dark:prose-invert max-w-none">
@@ -191,14 +203,28 @@ export default function TestAnalyzer() {
                               return match ? (
                                 <SyntaxHighlighter
                                   style={oneLight}
+                                  customStyle={{
+                                    lineHeight: "1.5",
+                                    fontSize: "0.85em",
+                                  }}
+                                  codeTagProps={{
+                                    style: {
+                                      lineHeight: "inherit",
+                                      fontSize: "inherit",
+                                    },
+                                  }}
                                   language="python"
                                   PreTag="div"
+                                  showLineNumbers
                                   {...props}
                                 >
                                   {String(children).replace(/\n$/, "")}
                                 </SyntaxHighlighter>
                               ) : (
-                                <code className={className} {...props}>
+                                <code
+                                  className="relative rounded bg-[#e4e4e7] px-[0.3rem] py-[0.2rem] font-mono text-sm text-[#383a42]"
+                                  {...props}
+                                >
                                   {children}
                                 </code>
                               );
@@ -210,30 +236,6 @@ export default function TestAnalyzer() {
                       </TabsContent>
                     ))}
                 </Tabs>
-
-                {/* <ReactMarkdown
-                  components={{
-                    code({ node, className, children, ref, style, ...props }) {
-                      const match = /language-(\w+)/.exec(className || "");
-                      return match ? (
-                        <SyntaxHighlighter
-                          style={oneLight}
-                          language="python"
-                          PreTag="div"
-                          {...props}
-                        >
-                          {String(children).replace(/\n$/, "")}
-                        </SyntaxHighlighter>
-                      ) : (
-                        <code className={className} {...props}>
-                          {children}
-                        </code>
-                      );
-                    },
-                  }}
-                >
-                  {result}
-                </ReactMarkdown> */}
               </div>
             </div>
           )}
