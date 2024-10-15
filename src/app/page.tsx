@@ -1,149 +1,246 @@
 "use client";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { useChat } from "ai/react";
-import { FileIcon, ImageIcon, Loader2Icon } from "lucide-react";
-import { FormEvent, useRef, useState } from "react";
-import { toast, ToastContainer } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { formatQuestion } from "@/lib/questionMarkdown";
+import { FileText, Loader2, Upload } from "lucide-react";
+import React, { useState } from "react";
+import ReactMarkdown from "react-markdown";
+import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
+import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-export default function Component() {
-  const [files, setFiles] = useState<FileList | undefined>(undefined);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+SyntaxHighlighter.supportedLanguages.push(python);
 
-  const [intermediateStepsLoading, setIntermediateStepsLoading] =
-    useState(false);
+export default function TestAnalyzer() {
+  const [file, setFile] = useState<File | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [answers, setAnswers] = useState<Array<{
+    questionText: string;
+    questionNumber: number;
+    type: string;
+    parameters: string[] | null;
+    code?: string;
+    formattedCode?: string;
+    executionResult: string;
+    executionSuccess: boolean;
+    explanation: string;
+  }> | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const [sourcesForMessages, setSourcesForMessages] = useState<
-    Record<string, any>
-  >({});
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    if (selectedFile && selectedFile.type === "application/pdf") {
+      setFile(selectedFile);
+      setError(null);
+    } else {
+      setFile(null);
+      setError("Please upload a valid PDF file.");
+    }
+  };
 
-  const {
-    messages,
-    input,
-    setInput,
-    handleInputChange,
-    handleSubmit,
-    isLoading,
-    setMessages,
-  } = useChat({
-    api: "api/process-exam",
-    // onResponse(response) {
-    //   const sourcesHeader = response.headers.get("x-sources");
-    //   const sources = sourcesHeader
-    //     ? JSON.parse(Buffer.from(sourcesHeader, "base64").toString("utf8"))
-    //     : [];
-    //   const messageIndexHeader = response.headers.get("x-message-index");
-    //   if (sources.length && messageIndexHeader !== null) {
-    //     setSourcesForMessages({
-    //       ...sourcesForMessages,
-    //       [messageIndexHeader]: sources,
-    //     });
-    //   }
-    // },
-    streamProtocol: "text",
-    onError: (e) => {
-      toast(e.message, {
-        theme: "dark",
+  const handleSubmit = async () => {
+    if (!file) {
+      setError("Please select a file before submitting.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    // Simulating file upload and processing
+    try {
+      const data = new FormData();
+      data.append("file", file);
+      const response = await fetch("/api/process-exam", {
+        method: "POST",
+        body: data,
       });
-    },
-  });
+      const body: {
+        response: Array<{
+          questionText: string;
+          questionNumber: number;
+          type: string;
+          parameters: string[] | null;
+          code?: string;
+          formattedCode?: string;
+          executionResult: string;
+          executionSuccess: boolean;
+          explanation: string;
+        }>;
+      } = await response.json();
+      // const body: {
+      //   response: Array<{
+      //     questionText: string;
+      //     questionNumber: number;
+      //     type: string;
+      //     parameters: string[] | null;
+      //     code?: string;
+      //     formattedCode?: string;
+      //     executionResult: string;
+      //     executionSuccess: boolean;
+      //     explanation: string;
+      //   }>;
+      // } = mockRes;
 
-  async function sendMessage(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    // if (!messages.length) {
-    //   await new Promise((resolve) => setTimeout(resolve, 300));
-    // }
-    // if (isLoading ?? intermediateStepsLoading) {
-    //   return;
-    // }
-    handleSubmit(undefined, {
-      allowEmptySubmit: true,
-      experimental_attachments: files,
-    });
-  }
+      setAnswers(body.response);
+      setResult(
+        body.response
+          .map((question) => formatQuestion(question))
+          .join("\n-----------------------------\n")
+      );
+    } catch (err) {
+      setError(
+        "An error occurred while processing the file. Please try again."
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <Card className="w-full max-w-2xl mx-auto">
-      <CardHeader>
-        <CardTitle>AI Exam Solver</CardTitle>
-        <CardDescription>
-          Upload a PDF or image of your exam paper to get Python solutions
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ScrollArea className="h-[400px] w-full pr-4">
-          {messages.map((m) => (
-            <div
-              key={m.id}
-              className={`mb-4 ${
-                m.role === "user" ? "text-right" : "text-left"
-              }`}
-            >
-              <div
-                className={`inline-block p-2 rounded-lg ${
-                  m.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
-                }`}
+    <div className="container mx-auto p-4 max-w-3xl min-h-screen flex flex-col">
+      <Card className="h-full flex-grow">
+        <CardHeader>
+          <CardTitle>Python Test Analyzer</CardTitle>
+          <CardDescription>
+            Upload a PDF of a Python programming test to get AI-powered analysis
+            and feedback.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            <div className="flex items-center justify-center w-full">
+              <label
+                htmlFor="dropzone-file"
+                className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg cursor-pointer bg-gray-50 dark:hover:bg-bray-800 dark:bg-gray-700 hover:bg-gray-100 dark:border-gray-600 dark:hover:border-gray-500 dark:hover:bg-gray-600"
               >
-                {m.content}
+                <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                  <Upload className="w-8 h-8 mb-4 text-gray-500 dark:text-gray-400" />
+                  <p className="mb-2 text-sm text-gray-500 dark:text-gray-400">
+                    <span className="font-semibold">Click to upload</span> or
+                    drag and drop
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    PDF file only
+                  </p>
+                </div>
+                <input
+                  id="dropzone-file"
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileChange}
+                  accept=".pdf"
+                />
+              </label>
+            </div>
+            {file && (
+              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                <FileText className="w-4 h-4" />
+                <span>{file.name}</span>
+              </div>
+            )}
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            <Button
+              onClick={handleSubmit}
+              disabled={!file || isLoading}
+              className="w-full"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Analyze Test"
+              )}
+            </Button>
+          </div>
+          {result && !isLoading && (
+            <div className="mt-8">
+              <h2 className="text-lg font-semibold mb-4">Analysis Results</h2>
+              <div className="prose dark:prose-invert max-w-none">
+                <Tabs defaultValue="Zadatak 3" className="w-full">
+                  <TabsList className="w-full">
+                    {answers &&
+                      answers.map((answer) => (
+                        <TabsTrigger
+                          key={answer.questionNumber}
+                          value={`Zadatak ${answer.questionNumber}`}
+                          className="w-1/3"
+                        >
+                          Zadatak {answer.questionNumber}.
+                        </TabsTrigger>
+                      ))}
+                  </TabsList>
+                  {answers &&
+                    answers.map((answer) => (
+                      <TabsContent
+                        key={answer.questionNumber}
+                        value={`Zadatak ${answer.questionNumber}`}
+                      >
+                        <ReactMarkdown
+                          components={{
+                            code({
+                              node,
+                              className,
+                              children,
+                              ref,
+                              style,
+                              ...props
+                            }) {
+                              const match = /language-(\w+)/.exec(
+                                className || ""
+                              );
+                              return match ? (
+                                <SyntaxHighlighter
+                                  style={oneLight}
+                                  customStyle={{
+                                    lineHeight: "1.5",
+                                    fontSize: "0.85em",
+                                  }}
+                                  codeTagProps={{
+                                    style: {
+                                      lineHeight: "inherit",
+                                      fontSize: "inherit",
+                                    },
+                                  }}
+                                  language="python"
+                                  PreTag="div"
+                                  showLineNumbers
+                                  {...props}
+                                >
+                                  {String(children).replace(/\n$/, "")}
+                                </SyntaxHighlighter>
+                              ) : (
+                                <code
+                                  className="relative rounded bg-[#e4e4e7] px-[0.3rem] py-[0.2rem] font-mono text-sm text-[#383a42]"
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            },
+                          }}
+                        >
+                          {formatQuestion(answer)}
+                        </ReactMarkdown>
+                      </TabsContent>
+                    ))}
+                </Tabs>
               </div>
             </div>
-          ))}
-          {isLoading && (
-            <div className="flex justify-center">
-              <Loader2Icon className="animate-spin" />
-            </div>
           )}
-        </ScrollArea>
-      </CardContent>
-      <CardFooter>
-        <form
-          onSubmit={sendMessage}
-          className="w-full flex items-center space-x-2"
-        >
-          <input
-            type="file"
-            accept=".pdf,image/*"
-            onChange={(event) => {
-              if (event.target.files) {
-                setFiles(event.target.files);
-              }
-            }}
-            className="hidden"
-            id="file-upload"
-          />
-          <label htmlFor="file-upload" className="flex-1">
-            <div className="flex items-center justify-center w-full p-2 border-2 border-dashed rounded-md cursor-pointer hover:border-primary">
-              {files && files.length > 0 ? (
-                <span className="flex items-center">
-                  {files[0].type.startsWith("image/") ? (
-                    <ImageIcon className="mr-2" />
-                  ) : (
-                    <FileIcon className="mr-2" />
-                  )}
-                  {files[0].name}
-                </span>
-              ) : (
-                <span>Choose PDF or Image</span>
-              )}
-            </div>
-          </label>
-          <Button type="submit" disabled={!files?.length || isLoading}>
-            {isLoading ? <Loader2Icon className="animate-spin" /> : "Upload"}
-          </Button>
-        </form>
-      </CardFooter>
-      <ToastContainer />
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
