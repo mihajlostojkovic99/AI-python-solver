@@ -20,6 +20,8 @@ import { executePythonCode } from "./agentTools";
 const tools = [executePythonCode];
 const toolNode = new ToolNode(tools);
 
+const REFLECTION_LOOP_COUNT = 3;
+
 const model = new ChatOpenAI({
   temperature: 0,
   model: "gpt-4o-mini",
@@ -180,8 +182,6 @@ async function reflectionNode(state: typeof GraphState.State) {
   const reflect = reflectionPrompt.pipe(reflectionModel);
   const res = await reflect.invoke({ messages: translated });
 
-  // console.log("REFLECTION RESPONSE: ", JSON.stringify(res));
-
   return {
     ...(res.critique
       ? { messages: [new HumanMessage({ content: res.critique })] }
@@ -196,12 +196,12 @@ const shouldContinue = (state: typeof GraphState.State) => {
 
   // console.log("SHOULD CONTINUE? COUNTER AT ", reflectionLoopCount);
 
-  if (reflectionLoopCount > 3) {
+  if (executionSuccess) return "output";
+
+  if (reflectionLoopCount > REFLECTION_LOOP_COUNT) {
     // TODO: return message "unable to solve"
     return "output";
   }
-
-  if (executionSuccess) return "output";
 
   const lastMessage = messages[messages.length - 1];
 
@@ -219,6 +219,10 @@ const shouldContinue = (state: typeof GraphState.State) => {
 async function outputNode(state: typeof GraphState.State) {
   // Logic to output the final result
   const { messages, formattedCode, executionSuccess } = state;
+
+  if (!executionSuccess) {
+    return { explanation: "Neočekivana greška prilikom analiziranja pitanja." };
+  }
 
   const executionResult = messages[messages.length - 1].content.toString();
 

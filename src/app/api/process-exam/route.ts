@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     file: fileBlob,
   });
 
-  const answers = await Promise.all(
+  const answers = await Promise.allSettled(
     finalState.questions.map(async (question) => {
       const res: Partial<typeof GraphState.State> = await solverAgent.invoke(
         question
@@ -33,5 +33,9 @@ export async function POST(req: NextRequest) {
     })
   );
 
-  return NextResponse.json({ response: answers });
+  const res = answers
+    .filter((a) => a.status === "fulfilled")
+    .map((a) => a.value);
+
+  return NextResponse.json({ response: res });
 }
