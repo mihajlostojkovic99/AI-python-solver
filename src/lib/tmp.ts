@@ -1,4 +1,6 @@
 export const mockRes = {
+  isExam: false,
+  reasoning: "No reasoning provided.",
   response: [
     {
       questionText:

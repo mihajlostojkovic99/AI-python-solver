@@ -1,5 +1,6 @@
 "use client";
 
+import AnalysisResult from "@/components/analysis-result";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,21 +9,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatQuestion } from "@/lib/questionMarkdown";
 import { FileText, Loader2, Upload } from "lucide-react";
 import React, { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import python from "react-syntax-highlighter/dist/esm/languages/prism/python";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
-
-SyntaxHighlighter.supportedLanguages.push(python);
 
 export default function TestAnalyzer() {
+  console.log("hello");
   const [file, setFile] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<string | null>(null);
+  const [isExam, setIsExam] = useState<boolean | null>(null);
+  const [reasoning, setReasoning] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Array<{
     questionText: string;
     questionNumber: number;
@@ -56,7 +53,6 @@ export default function TestAnalyzer() {
     setIsLoading(true);
     setError(null);
 
-    // Simulating file upload and processing
     try {
       const data = new FormData();
       data.append("file", file);
@@ -65,6 +61,8 @@ export default function TestAnalyzer() {
         body: data,
       });
       const body: {
+        isExam: boolean;
+        reasoning: string;
         response: Array<{
           questionText: string;
           questionNumber: number;
@@ -78,6 +76,8 @@ export default function TestAnalyzer() {
         }>;
       } = await response.json();
       // const body: {
+      //   isExam: boolean;
+      //   reasoning: string;
       //   response: Array<{
       //     questionText: string;
       //     questionNumber: number;
@@ -91,6 +91,8 @@ export default function TestAnalyzer() {
       //   }>;
       // } = mockRes;
 
+      setIsExam(body.isExam);
+      setReasoning(body.reasoning);
       setAnswers(body.response);
       setResult(
         body.response
@@ -164,79 +166,20 @@ export default function TestAnalyzer() {
               )}
             </Button>
           </div>
-          {result && !isLoading && (
+          {!isLoading && (
             <div className="mt-8">
-              <h2 className="text-lg font-semibold mb-4">Analysis Results</h2>
-              <div className="prose dark:prose-invert max-w-none">
-                <Tabs defaultValue="Zadatak 3" className="w-full">
-                  <TabsList className="w-full">
-                    {answers &&
-                      answers.map((answer) => (
-                        <TabsTrigger
-                          key={answer.questionNumber}
-                          value={`Zadatak ${answer.questionNumber}`}
-                          className="w-1/3"
-                        >
-                          Zadatak {answer.questionNumber}.
-                        </TabsTrigger>
-                      ))}
-                  </TabsList>
-                  {answers &&
-                    answers.map((answer) => (
-                      <TabsContent
-                        key={answer.questionNumber}
-                        value={`Zadatak ${answer.questionNumber}`}
-                      >
-                        <ReactMarkdown
-                          components={{
-                            code({
-                              node,
-                              className,
-                              children,
-                              ref,
-                              style,
-                              ...props
-                            }) {
-                              const match = /language-(\w+)/.exec(
-                                className || ""
-                              );
-                              return match ? (
-                                <SyntaxHighlighter
-                                  style={oneLight}
-                                  customStyle={{
-                                    lineHeight: "1.5",
-                                    fontSize: "0.85em",
-                                  }}
-                                  codeTagProps={{
-                                    style: {
-                                      lineHeight: "inherit",
-                                      fontSize: "inherit",
-                                    },
-                                  }}
-                                  language="python"
-                                  PreTag="div"
-                                  showLineNumbers
-                                  {...props}
-                                >
-                                  {String(children).replace(/\n$/, "")}
-                                </SyntaxHighlighter>
-                              ) : (
-                                <code
-                                  className="relative rounded bg-[#e4e4e7] px-[0.3rem] py-[0.2rem] font-mono text-sm text-[#383a42]"
-                                  {...props}
-                                >
-                                  {children}
-                                </code>
-                              );
-                            },
-                          }}
-                        >
-                          {formatQuestion(answer)}
-                        </ReactMarkdown>
-                      </TabsContent>
-                    ))}
-                </Tabs>
-              </div>
+              {answers && isExam ? (
+                <AnalysisResult answers={answers} />
+              ) : (
+                <>
+                  <h2 className="text-lg font-semibold mb-4 text-red-800">
+                    File was not recognized as a Python exam
+                  </h2>
+                  <div className="prose dark:prose-invert max-w-none text-gray-600">
+                    {reasoning}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </CardContent>

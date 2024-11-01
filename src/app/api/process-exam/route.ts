@@ -11,6 +11,8 @@ export async function POST(req: NextRequest) {
   const fileBlob = body.get("file");
 
   const finalState: {
+    isExam: boolean;
+    reasoning: string;
     questions: Array<{
       questionText: string;
       questionNumber: number;
@@ -23,19 +25,25 @@ export async function POST(req: NextRequest) {
     file: fileBlob,
   });
 
-  const answers = await Promise.allSettled(
-    finalState.questions.map(async (question) => {
-      const res: Partial<typeof GraphState.State> = await solverAgent.invoke(
-        question
-      );
-      delete res.messages;
-      return { ...res, questionText: question.questionText };
-    })
-  );
+  let res: Array<Partial<typeof GraphState.State>> = [];
 
-  const res = answers
-    .filter((a) => a.status === "fulfilled")
-    .map((a) => a.value);
+  if (finalState.isExam) {
+    const answers = await Promise.allSettled(
+      finalState.questions.map(async (question) => {
+        const res: Partial<typeof GraphState.State> = await solverAgent.invoke(
+          question
+        );
+        delete res.messages;
+        return { ...res, questionText: question.questionText };
+      })
+    );
 
-  return NextResponse.json({ response: res });
+    res = answers.filter((a) => a.status === "fulfilled").map((a) => a.value);
+  }
+
+  return NextResponse.json({
+    isExam: finalState.isExam,
+    reasoning: finalState.reasoning,
+    response: res,
+  });
 }

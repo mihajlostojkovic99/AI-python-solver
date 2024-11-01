@@ -10,6 +10,8 @@ export type QuestionType = "theoretical" | "coding";
 const GraphState = Annotation.Root({
   file: Annotation<Blob>(),
   exam_text: Annotation<string>(),
+  isExam: Annotation<boolean>(),
+  reasoning: Annotation<string>(),
   questions: Annotation<
     Array<{
       questionText: string;
@@ -39,65 +41,73 @@ async function classificationNode(state: typeof GraphState.State) {
   });
   const res = await modelClassification.withStructuredOutput(
     z.object({
-      pythonQuestions: z.array(
-        z.object({
-          questionText: z
-            .string()
-            .describe(
-              "The extracted question text. Extract only the question text before the code."
-            ),
-          questionNumber: z
-            .number()
-            .min(1)
-            .max(5)
-            .describe(
-              "The question number. Usually can be found at the start of the question."
-            ),
-          type: z
-            .enum(["theoretical", "coding"])
-            .describe(
-              "The type of the question. Theoretical questions are strictly about some Python concepts while coding questions have some code blocks that need to be analyzed."
-            ),
-          parameters: z
-            .array(z.string())
-            .optional()
-            .describe(
-              "The parameters given in the question text (NOT IN THE CODE) that are required to successfully analyze and execute the code. If the question doesn't need parameters then leave this undefined."
-            ),
-          code: z
-            .string()
-            .optional()
-            .describe("The Python code block from the question"),
-          answers: z
-            .array(z.string())
-            .describe(
-              'An array of question answers from the question that the student chooses from. eg. ["A) 12345", "B) abcde", "C) 123ABC"]'
-            ),
-        })
-      ),
+      isExam: z
+        .boolean()
+        .describe(
+          "The extracted text is from a PROGRAMIRANJE 1 exam. If it's not, then don't try to extract the questions."
+        ),
+      reasoning: z
+        .string()
+        .describe(
+          "Describe your reasoning for whether the text is from a PROGRAMIRANJE 1 exam or not. Reasoning needs to be in the serbian language!"
+        ),
+      pythonQuestions: z
+        .array(
+          z.object({
+            questionText: z
+              .string()
+              .describe(
+                "The extracted question text. Extract only the question text before the code."
+              ),
+            questionNumber: z
+              .number()
+              .min(1)
+              .max(5)
+              .describe(
+                "The question number. Usually can be found at the start of the question."
+              ),
+            type: z
+              .enum(["theoretical", "coding"])
+              .describe(
+                "The type of the question. Theoretical questions are strictly about some Python concepts while coding questions have some code blocks that need to be analyzed."
+              ),
+            parameters: z
+              .array(z.string())
+              .optional()
+              .describe(
+                "The parameters given in the question text (NOT IN THE CODE) that are required to successfully analyze and execute the code. If the question doesn't need parameters then leave this undefined."
+              ),
+            code: z
+              .string()
+              .optional()
+              .describe("The Python code block from the question"),
+            answers: z
+              .array(z.string())
+              .describe(
+                'An array of question answers from the question that the student chooses from. eg. ["A) 12345", "B) abcde", "C) 123ABC"]'
+              ),
+          })
+        )
+        .optional(),
     })
   )
     .invoke(`Extract only Python related questions and their data that is required in a JSON format. The question number can be found at the start of the question, the execution parameters values are provided in the question text if needed (they are never in the code). If it's a coding question, it will also have a code block for analysis. Theoretical questions don't have any code and are strictly based around Python concepts. At the end of the question are the given question answers that a student should choose from.
+
+    To check if the text is indeed from an exam, check that it includes the faculty name (ELEKTROTEHNIČKI FAKULTET UNIVERZITETA U BEOGRADU / ETF) and the curriculum name which is PROGRAMIRANJE 1. If it's not, then don't try to extract the questions.
     
     Whole exam text (and code): 
     ${state.exam_text}
     `);
 
-  state.questions = res.pythonQuestions;
-  return state;
+  return {
+    questions: res.pythonQuestions,
+    reasoning: res.reasoning ?? "No reasoning provided.",
+    isExam: res.isExam,
+  };
 }
 
 function outputNode(state: typeof GraphState.State) {
   // Logic to output the final result
-  const finalOut = state.questions
-    .map(
-      (question) =>
-        `OUTPUT NODE: ${question.questionText}
-        `
-    )
-    .join(`\n\n`);
-
-  console.log("OUTPUT NODE: ", finalOut);
   return state;
 }
 

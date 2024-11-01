@@ -248,7 +248,7 @@ async function outputNode(state: typeof GraphState.State) {
     code: formattedCode,
     result: executionResult,
   });
-  console.log("OUTPUT NODE RESULT (EXPLANATION): ", res, `\n\n`);
+  // console.log("OUTPUT NODE RESULT (EXPLANATION): ", res, `\n\n`);
   return {
     // response: messages[messages.length - 1].content.toString(),
     executionResult,
