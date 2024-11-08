@@ -4,6 +4,7 @@ export const formatQuestion = (question: {
   type: string;
   parameters: string[] | null;
   code?: string;
+  answers: string[];
   formattedCode?: string;
   executionResult: string;
   executionSuccess: boolean;
@@ -30,7 +31,13 @@ ${
 
 **Rezultat izvrsavanja:** ${
   question.executionSuccess && question.executionResult
-    ? `✅ Uspešno -> ${question.executionResult}`
+    ? `__${question.executionResult}__ -> ${
+        question.answers.some((ans) => ans.includes(question.executionResult))
+          ? `✅ Uspešno - Tačan odgovor je pod **${question.answers.find(
+              (ans) => ans.includes(question.executionResult)
+            )}**`
+          : "❌ Neuspešno - Rešenje nije ponuđeno"
+      }`
     : "❌ Neuspešno"
 }
 

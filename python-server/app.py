@@ -22,7 +22,7 @@ def hello():
         code = compile(code, '<string>', 'exec')
         exec(code, globals())
         # Get the output from the executed code
-        result = output.getvalue()
+        result = output.getvalue().strip()
     except Exception as e:
         # Handle any exceptions that occur during code execution
         result = str(e)

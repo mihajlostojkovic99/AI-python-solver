@@ -69,6 +69,7 @@ export default function TestAnalyzer() {
           type: string;
           parameters: string[] | null;
           code?: string;
+          answers: string[];
           formattedCode?: string;
           executionResult: string;
           executionSuccess: boolean;
@@ -166,7 +167,7 @@ export default function TestAnalyzer() {
               )}
             </Button>
           </div>
-          {!isLoading && (
+          {!isLoading && result && (
             <div className="mt-8">
               {answers && isExam ? (
                 <AnalysisResult answers={answers} />

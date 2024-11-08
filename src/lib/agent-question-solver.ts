@@ -4,6 +4,8 @@ import {
   AIMessage,
   BaseMessage,
   HumanMessage,
+  isHumanMessage,
+  isToolMessage,
   SystemMessage,
 } from "@langchain/core/messages";
 import { StringOutputParser } from "@langchain/core/output_parsers";
@@ -18,14 +20,14 @@ import { z } from "zod";
 import { executePythonCode } from "./agentTools";
 
 const tools = [executePythonCode];
-const toolNode = new ToolNode(tools);
+const toolNode = new ToolNode(tools, { handleToolErrors: false });
 
 const REFLECTION_LOOP_COUNT = 3;
 
 const model = new ChatOpenAI({
   temperature: 0,
   model: "gpt-4o-mini",
-}).bindTools(tools);
+}).bindTools(tools, { parallel_tool_calls: false });
 
 type QuestionType = "theoretical" | "coding" | "unknown";
 
@@ -36,6 +38,7 @@ export const GraphState = Annotation.Root({
   type: Annotation<QuestionType>(),
   parameters: Annotation<string[] | undefined>(),
   code: Annotation<string>(),
+  answers: Annotation<string[]>(),
   formattedCode: Annotation<string>(),
   executionResult: Annotation<string>(),
   executionSuccess: Annotation<boolean>(),
@@ -96,11 +99,11 @@ async function executorNode(state: typeof GraphState.State) {
 
   if (state.messages.length === 0) {
     const message = new HumanMessage({
-      content: `Execute the following Python code and return only the result. If the code fails to execute, return the error message. Make sure to include any required imports or function definitions. Respond short and concise by including the execution result and nothing else!
+      content: `Execute the following Python code and return the result. If the code fails to execute, return the error message. Make sure to include any required imports or function definitions. Respond short and concise by including the execution result and nothing else!
       
       ${
         state.parameters && state.parameters.length > 0
-          ? `The code might also require these parameters to run so insert them at an appropirate place:
+          ? `The code might also require these parameters to run so insert them in an appropirate place:
         Parameters: [${state.parameters?.join(", ")}]`
           : ""
       }
@@ -120,9 +123,22 @@ async function executorNode(state: typeof GraphState.State) {
 
   const lastMessage = state.messages[state.messages.length - 1];
 
-  if (state.executionSuccess && lastMessage?._getType() !== "human") {
+  if (state.executionSuccess && !isHumanMessage(lastMessage)) {
     // If the execution was successful and the last message is not a "human" critique message, the process is finished
     return state;
+  }
+
+  if (isToolMessage(lastMessage)) {
+    const messageContent = JSON.parse(lastMessage.content as string);
+    console.log("TOOL MESSAGE CONTENT: ", JSON.stringify(messageContent));
+    return {
+      messages: [
+        ...state.messages,
+        new AIMessage({
+          content: `When executed, the code produced this output: ${messageContent.result}`,
+        }),
+      ],
+    };
   }
 
   const res = await executionChain.invoke({ messages: state.messages });
@@ -139,17 +155,15 @@ async function reflectionNode(state: typeof GraphState.State) {
   // Logic for reflection on the result
   const { messages, executionSuccess } = state;
 
-  // console.log("REFLECTION NODE COUNTER: ", state.reflectionLoopCount);
-
   const reflectionModel = new ChatOpenAI({
     temperature: 0,
-    model: "gpt-4o-mini",
+    model: "gpt-4o",
   }).withStructuredOutput(
     z.object({
-      executedSuccessfully: z
+      executedCorrectly: z
         .boolean()
         .describe(
-          "A simple true or false value explaining if the code was executed successully or an error occured."
+          "A simple true or false value explaining if the code was executed correctly and if the result is one of the provided choices or there's a mistake in the code."
         ),
       critique: z
         .string()
@@ -161,21 +175,29 @@ async function reflectionNode(state: typeof GraphState.State) {
   );
   const clsMap: { [key: string]: new (content: string) => BaseMessage } = {
     ai: HumanMessage,
-    tool: HumanMessage,
     human: AIMessage,
   };
   const translated = [
     messages[0],
     ...messages
       .slice(1)
+      .filter((msg) => !isToolMessage(msg))
       .map((msg) => new clsMap[msg._getType()](msg.content.toString())),
   ];
 
   const reflectionPrompt = ChatPromptTemplate.fromMessages([
     [
       "system",
-      `You are a Python language debugger tasked with helping the user on executing Python code. Analyse the code that the user sent and the execution response. If there's an error, include recommendations on how to fix the code for them to try and resolve the error.
-      Respond in a JSON format with all required information.`,
+      `You are a Python language debugger tasked with helping the user on executing Python code. Analyse the code that the user sent and the execution response. If there's an error, include recommendations on how to fix the code for them to try and resolve the error. If the code was executed without errors but the output is not an expected one, count it like it wasn't executed correctly, analyze the result and provide recommendations on how to improve the code.
+      
+      The result of code execution should be one of the following: ${state.answers.join(
+        ", "
+      )}. If it's not then the code wasn't executed correctly.
+
+      **Note:** Often, the response might not match one of the multiple choices because there was a mistake when parameters for code execution were inserted into the code. Check if the user correctly inserted them. Sometimes the parameter might be a single string but the user split it on whitespaces into multiple parameters etc.
+
+      Respond in a JSON format with all required information.
+      `,
     ],
     new MessagesPlaceholder("messages"),
   ]);
@@ -183,23 +205,20 @@ async function reflectionNode(state: typeof GraphState.State) {
   const res = await reflect.invoke({ messages: translated });
 
   return {
-    ...(res.critique
+    ...(!res.executedCorrectly && res.critique
       ? { messages: [new HumanMessage({ content: res.critique })] }
       : {}),
     reflectionLoopCount: (state.reflectionLoopCount ?? 0) + 1,
-    executionSuccess: res.executedSuccessfully,
+    executionSuccess: res.executedCorrectly,
   };
 }
 
 const shouldContinue = (state: typeof GraphState.State) => {
   const { messages, reflectionLoopCount, executionSuccess } = state;
 
-  // console.log("SHOULD CONTINUE? COUNTER AT ", reflectionLoopCount);
-
   if (executionSuccess) return "output";
 
   if (reflectionLoopCount > REFLECTION_LOOP_COUNT) {
-    // TODO: return message "unable to solve"
     return "output";
   }
 
@@ -224,7 +243,9 @@ async function outputNode(state: typeof GraphState.State) {
     return { explanation: "Neočekivana greška prilikom analiziranja pitanja." };
   }
 
-  const executionResult = messages[messages.length - 1].content.toString();
+  const executionResult = messages[messages.length - 1].content
+    .toString()
+    .match(/(?<=When executed, the code produced this output:\s)(.*)/g)?.[0];
 
   const outputPrompt = ChatPromptTemplate.fromMessages([
     new SystemMessage(`Ti si Python asistent za objasnjavanje koda. Tvoj zadatak je da objasnis korisniku kako se kod izvrsio da bi se doslo do krajnjeg rezultata izvrsavanja. Ukratko objasni korisniku postupak izvrsavanja u par recenica.
